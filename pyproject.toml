@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "architecture-diagram-generator"
+version = "0.1.0"
+description = "Turn unstructured technical notes into a downloadable architecture diagram without inventing components."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115.0,<1",
+    "uvicorn>=0.32.0,<1",
+    "pydantic>=2.9.0,<3",
+    "python-multipart>=0.0.12,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0,<10",
+    "httpx>=0.27.0,<1",
+]
+
+[project.scripts]
+archdiag = "archdiag.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+archdiag = ["static/*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"

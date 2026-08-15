@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Use Case 2 — Architecture diagram from notes</title>
+  <style>
+    :root {
+      --bg: #f4f1ea;
+      --panel: #fffdf8;
+      --ink: #1d2430;
+      --muted: #5c6777;
+      --accent: #0f6e62;
+      --warn: #7a4b00;
+      --line: #d9d1c3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.45;
+    }
+    header, main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    h1 { font-size: 1.5rem; margin: 0 0 6px; }
+    .banner {
+      background: #fff6e8;
+      border: 1px solid #e6d3ae;
+      color: var(--warn);
+      padding: 10px 12px;
+      border-radius: 8px;
+      margin: 12px 0 18px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px;
+      font: inherit;
+    }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      border-radius: 6px;
+      padding: 9px 14px;
+      font-weight: 650;
+      cursor: pointer;
+      margin-right: 8px;
+      margin-top: 8px;
+    }
+    button.secondary { background: #3d4a5c; }
+    .muted { color: var(--muted); }
+    .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 8px 0; background: #fff; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
+    th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 6px; vertical-align: top; }
+    .diagram { overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Use Case 2 — Architecture diagram generation</h1>
+    <p class="muted">Paste unstructured technical notes. The app extracts only components and flows that the notes support, then draws a downloadable diagram.</p>
+    <div class="banner">Nothing is invented. Ambiguous or missing detail is listed instead of guessed.</div>
+  </header>
+  <main>
+    <section class="panel">
+      <label for="notes">Technical notes</label>
+      <textarea id="notes" placeholder="Paste notes here"></textarea>
+      <div>
+        <button class="secondary" type="button" id="example">Load exercise example</button>
+        <button type="button" id="run">Generate diagram</button>
+      </div>
+    </section>
+    <div id="out"></div>
+  </main>
+  <script>
+    const notes = document.getElementById("notes");
+    const out = document.getElementById("out");
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[ch]));
+    }
+
+    document.getElementById("example").onclick = async () => {
+      const res = await fetch("/example");
+      const data = await res.json();
+      notes.value = data.notes || "";
+    };
+
+    document.getElementById("run").onclick = async () => {
+      out.innerHTML = "<p class='muted'>Interpreting notes…</p>";
+      try {
+        const res = await fetch("/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ notes: notes.value })
+        });
+        if (!res.ok) throw new Error(await res.text());
+        render(await res.json());
+      } catch (err) {
+        out.innerHTML = `<p class="banner">${escapeHtml(err.message)}</p>`;
+      }
+    };
+
+    function render(data) {
+      const components = data.components.map(c => `
+        <tr>
+          <td>${escapeHtml(c.name)}</td>
+          <td>${escapeHtml(c.kind)}</td>
+          <td>${escapeHtml(c.zone)}</td>
+          <td>${escapeHtml((c.details || []).join("; "))}</td>
+          <td class="muted">${escapeHtml((c.evidence || []).join(" "))}</td>
+        </tr>`).join("");
+      const connections = data.connections.map(c => `
+        <tr>
+          <td>${escapeHtml(c.source_id)} → ${escapeHtml(c.target_id)}</td>
+          <td>${escapeHtml(c.label)}</td>
+          <td class="muted">${escapeHtml(c.evidence)}</td>
+        </tr>`).join("");
+      const amb = (data.ambiguities || []).map(a => `<li>${escapeHtml(a)}</li>`).join("") || "<li>None flagged.</li>";
+      out.innerHTML = `
+        <section class="panel">
+          <p class="muted">${escapeHtml(data.disclaimer)}</p>
+          <button type="button" id="download">Download SVG</button>
+          <div class="diagram">${data.svg}</div>
+        </section>
+        <section class="panel">
+          <h2>Components found in the notes</h2>
+          <table>
+            <thead><tr><th>Name</th><th>Kind</th><th>Zone</th><th>Details</th><th>Evidence</th></tr></thead>
+            <tbody>${components}</tbody>
+          </table>
+        </section>
+        <section class="panel">
+          <h2>Connections</h2>
+          <table>
+            <thead><tr><th>Flow</th><th>Protocol / port</th><th>Evidence</th></tr></thead>
+            <tbody>${connections}</tbody>
+          </table>
+        </section>
+        <section class="panel">
+          <h2>Ambiguous or insufficient information</h2>
+          <ul>${amb}</ul>
+        </section>
+      `;
+      document.getElementById("download").onclick = () => {
+        const blob = new Blob([data.svg], { type: "image/svg+xml" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "architecture.svg";
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+    }
+  </script>
+</body>
+</html>

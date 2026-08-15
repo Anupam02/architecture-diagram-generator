@@ -1,0 +1,6 @@
+External users connect through a firewall to a load balancer using HTTPS on port 443.
+The load balancer distributes traffic to two application servers.
+The application servers communicate with a PostgreSQL database on port 5432.
+The application servers also connect to an external authentication service using HTTPS.
+An external monitoring platform connects to the application servers on the required monitoring ports.
+Administrative access to the application servers is permitted only from the internal network.

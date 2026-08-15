@@ -1,0 +1,4 @@
+Clients reach an API gateway using HTTPS on port 443.
+The API gateway routes traffic to application servers.
+The application servers communicate with Redis.
+The application servers connect to MySQL on port 3306.
