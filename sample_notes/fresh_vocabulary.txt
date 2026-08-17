@@ -1,0 +1,5 @@
+Mobile clients reach an API gateway over TLS on port 443.
+The API gateway forwards requests to three web servers.
+The web servers query a MySQL database on port 3306.
+The web servers also call a third-party payment gateway using HTTPS.
+A separate logging service receives events from the web servers on an unspecified port.

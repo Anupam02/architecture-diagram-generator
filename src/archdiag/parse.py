@@ -9,20 +9,47 @@ from archdiag.schema import ArchitectureDiagram, Component, Connection
 # Recognised only when the notes actually contain these phrases.
 # The extractor will not add a component that does not match.
 CATALOG: tuple[tuple[str, str, str, str, str], ...] = (
-    ("external-users", "External users", "client", "external", r"external users|(?:^|\b)users connect"),
+    (
+        "external-users",
+        "Users / clients",
+        "client",
+        "external",
+        r"external users|mobile clients?|end users?|clients? (?:connect|reach)|(?:^|\b)users connect",
+    ),
     ("firewall", "Firewall", "firewall", "edge", r"\bfirewalls?\b"),
     ("load-balancer", "Load balancer", "load_balancer", "edge", r"load balancers?"),
-    ("app-servers", "Application servers", "application_server", "application", r"application servers?"),
+    (
+        "app-servers",
+        "Application servers",
+        "application_server",
+        "application",
+        r"application servers?|backend servers?",
+    ),
+    ("web-servers", "Web servers", "application_server", "application", r"web servers?"),
     ("postgres", "PostgreSQL database", "database", "data", r"postgresql(?: database)?"),
     ("mysql", "MySQL database", "database", "data", r"\bmysql\b"),
     ("database", "Database", "database", "data", r"\bdatabases?\b"),
     ("auth-service", "External authentication service", "external_system", "external", r"authentication service"),
+    ("identity-provider", "Identity provider", "external_system", "external", r"identity provider|\bidp\b|\bsso\b"),
     ("monitoring", "External monitoring platform", "external_system", "external", r"monitoring platform"),
-    ("internal-network", "Internal network", "network_zone", "internal", r"internal network"),
+    ("logging-service", "Logging service", "observability", "internal", r"logging service|log aggregat"),
+    (
+        "notification-service",
+        "Notification service",
+        "application_service",
+        "application",
+        r"notification service|notifier",
+    ),
+    ("internal-network", "Internal network", "network_zone", "internal", r"internal network|dedicated network"),
     ("api-gateway", "API gateway", "gateway", "edge", r"api gateway"),
+    ("payment-gateway", "Payment gateway", "gateway", "external", r"payment gateway"),
     ("cache", "Cache", "cache", "data", r"\bredis\b|\bmemcached\b|\bcache\b"),
     ("object-storage", "Object storage", "storage", "data", r"\bs3\b|object storage"),
+    ("message-queue", "Message queue", "queue", "data", r"message queues?|\bkafka\b|\brabbitmq\b|\bsqs\b"),
+    ("cdn", "CDN", "cdn", "edge", r"\bcdn\b|content delivery network"),
     ("vpn", "VPN", "network", "edge", r"\bvpn\b"),
+    ("dns", "DNS", "network", "edge", r"\bdns\b|name server"),
+    ("reverse-proxy", "Reverse proxy", "proxy", "edge", r"reverse proxy"),
 )
 
 CONNECTION_VERBS = (
@@ -34,7 +61,24 @@ CONNECTION_VERBS = (
     "send",
     "talk",
     "reach",
+    "forward",
+    "quer",
+    "call",
+    "receiv",
 )
+
+_NUMBER_WORD = r"(?:two|three|four|five|six|seven|eight|nine|ten|\d+)"
+_RESTRICT = re.compile(r"\b(?:only from|permitted only|restricted to|limited to)\b")
+_HOST_KINDS = {
+    "client",
+    "application_server",
+    "application_service",
+    "load_balancer",
+    "gateway",
+    "firewall",
+    "external_system",
+    "proxy",
+}
 
 
 @dataclass
@@ -140,8 +184,6 @@ def _find_connections(
         seen.add(key)
         protocol = _protocol(sentence)
         port = _port(sentence)
-        if "required monitoring ports" in sentence.lower():
-            port = None
         label_bits = [b for b in (protocol, f"port {port}" if port else None) if b]
         connections.append(
             Connection(
@@ -195,14 +237,19 @@ def _port(sentence: str) -> str | None:
 def _details_for(hit: CatalogHit) -> list[str]:
     details: list[str] = []
     blob = " ".join(hit.evidence).lower()
-    if hit.id == "app-servers" and re.search(r"two application servers", blob):
-        details.append("Count: two (shown as one logical group; not named individually)")
+    if re.search(rf"\b{_NUMBER_WORD}\s+(?:{hit.pattern})", blob) or re.search(
+        rf"\ba number of\s+(?:{hit.pattern})", blob
+    ):
+        details.append(
+            f"Count is given for {hit.name.lower()} but instances are not named individually "
+            "(shown as one logical group)"
+        )
     for port in re.findall(r"port\s+(\d+)", blob):
         details.append(f"Port mentioned: {port}")
     if "https" in blob:
         details.append("Protocol mentioned: HTTPS")
-    if "required monitoring ports" in blob:
-        details.append("Monitoring ports were not numbered")
+    if re.search(r"\bports?\b", blob) and not re.search(r"port\s+\d+", blob):
+        details.append("Ports were mentioned without numbers")
     return details
 
 
@@ -212,21 +259,43 @@ def _ambiguities(
     connections: list[Connection],
 ) -> list[str]:
     items: list[str] = []
-    blob = " ".join(s.lower() for s in sentences)
-    if "required monitoring ports" in blob:
-        items.append("Monitoring ports are mentioned but no port numbers are given.")
-    if "two application servers" in blob:
-        items.append(
-            "Two application servers are mentioned but not named separately, so they are drawn as one logical group."
-        )
-    if "administrative access" in blob and "internal network" in blob:
-        items.append(
-            "Admin access is limited to the internal network; no admin workstation host is named."
-        )
+    seen: set[str] = set()
+
+    def add(message: str) -> None:
+        if message not in seen:
+            seen.add(message)
+            items.append(message)
+
+    for sentence in sentences:
+        lowered = sentence.lower()
+        if re.search(r"\bports?\b", lowered) and _port(sentence) is None:
+            if "monitoring" in lowered:
+                add("Monitoring ports are mentioned but no port numbers are given.")
+            else:
+                add("A port is mentioned but no port number is given.")
+        for hit in hits.values():
+            numbered = re.search(rf"\b{_NUMBER_WORD}\s+(?:{hit.pattern})", lowered)
+            numbered = numbered or re.search(rf"\ba number of\s+(?:{hit.pattern})", lowered)
+            if numbered:
+                add(
+                    f"{hit.name} are mentioned as a numbered group but not named separately, "
+                    "so they are drawn as one logical group."
+                )
+        if _RESTRICT.search(lowered) and re.search(r"\baccess\b", lowered):
+            mentioned = _mentioned_in(sentence, hits)
+            host_sources = [h for h in mentioned if h.kind in _HOST_KINDS]
+            zone_sources = [h for h in mentioned if h.kind in {"network_zone", "network"}]
+            if zone_sources and not any(h.kind == "client" for h in host_sources):
+                add(
+                    "Access is limited to a network or zone; no source host is named."
+                )
+            elif not mentioned:
+                add("Access is restricted but no source system is named.")
+
     if hits and not connections:
-        items.append("Components were found but no explicit connections could be extracted.")
+        add("Components were found but no explicit connections could be extracted.")
     if not hits:
-        items.append(
+        add(
             "No known infrastructure components were recognised. "
             "The notes may use names that are not in the extractor catalog."
         )

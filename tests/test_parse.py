@@ -57,3 +57,29 @@ def test_second_sample_picks_up_named_components() -> None:
     pairs = {(c.source_id, c.target_id) for c in model.connections}
     assert ("api-gateway", "app-servers") in pairs
     assert ("app-servers", "mysql") in pairs
+
+
+def test_exercise_example_still_flags_three_ambiguities() -> None:
+    model = interpret_notes(EXAMPLE)
+    blob = " ".join(model.ambiguities).lower()
+    assert "monitoring ports" in blob
+    assert "application servers" in blob and "numbered group" in blob
+    assert "network or zone" in blob or "internal network" in blob
+    assert len(model.ambiguities) >= 3
+
+
+def test_fresh_vocabulary_recognises_catalog_synonyms() -> None:
+    notes = Path("sample_notes/fresh_vocabulary.txt").read_text(encoding="utf-8")
+    model = interpret_notes(notes)
+    ids = {c.id for c in model.components}
+    assert "external-users" in ids
+    assert "api-gateway" in ids
+    assert "web-servers" in ids
+    assert "mysql" in ids
+    assert "payment-gateway" in ids
+    assert "logging-service" in ids
+    assert "app-servers" not in ids
+    blob = " ".join(model.ambiguities).lower()
+    assert "port" in blob and "number" in blob
+    assert "web servers" in blob and "numbered group" in blob
+
