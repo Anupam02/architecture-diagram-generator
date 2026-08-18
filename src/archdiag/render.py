@@ -1,5 +1,19 @@
 from __future__ import annotations
 
+from collections import defaultdict
+
+from archdiag.layout import (
+    BOX_H,
+    BOX_W,
+    COL_W,
+    KIND_STROKE,
+    PAD_X,
+    ZONE_TINT,
+    edge_path,
+    label_anchor,
+    layout_boxes,
+    wrap_lines,
+)
 from archdiag.schema import Component, Connection
 
 
@@ -8,59 +22,106 @@ def render_svg(
     connections: list[Connection],
     ambiguities: list[str],
 ) -> str:
-    zone_order = ["external", "edge", "application", "data", "internal", "unspecified"]
-    grouped: dict[str, list[Component]] = {z: [] for z in zone_order}
-    for comp in components:
-        if comp.zone in grouped:
-            grouped[comp.zone].append(comp)
-        else:
-            grouped["unspecified"].append(comp)
-    cols = [z for z in zone_order if grouped.get(z)]
-    col_w, row_h, pad = 230, 96, 36
-    width = max(pad * 2 + max(len(cols), 1) * col_w, 760)
-    max_rows = max((len(grouped[z]) for z in cols), default=1)
+    cols, boxes, width, diagram_bottom = layout_boxes(components)
     amb = ambiguities or ["None flagged."]
-    height = pad * 2 + 70 + max_rows * row_h + 36 + 20 * len(amb)
+    amb_lines: list[str] = []
+    for item in amb:
+        amb_lines.extend(wrap_lines(item, 96))
+    height = diagram_bottom + 36 + 18 * (len(amb_lines) + 1)
+    fan = _fan_offsets(connections)
 
-    positions: dict[str, tuple[float, float]] = {}
     parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">',
-        "<defs><marker id='arrow' markerWidth='8' markerHeight='8' refX='6' refY='3' orient='auto'><path d='M0,0 L6,3 L0,6 z' fill='#3d4a5c'/></marker></defs>",
-        "<style>text{font-family:Segoe UI,sans-serif;font-size:12px;fill:#1d2430}.muted{fill:#5c6777;font-size:11px}.title{font-size:16px;font-weight:700}</style>",
-        '<rect width="100%" height="100%" fill="#f4f1ea"/>',
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width:.0f}" height="{height:.0f}" viewBox="0 0 {width:.0f} {height:.0f}">',
+        _defs(),
+        "<style>"
+        "text{font-family:Segoe UI,sans-serif;font-size:12px;fill:#1d2430}"
+        ".muted{fill:#5c6777;font-size:11px}.title{font-size:16px;font-weight:700}"
+        ".zone{font-size:11px;font-weight:700;letter-spacing:.06em}"
+        ".node:hover rect{filter:brightness(0.98)}"
+        "</style>",
+        '<rect width="100%" height="100%" fill="#f7f5f0"/>',
         '<text class="title" x="24" y="28">Architecture from technical notes</text>',
+        '<text class="muted" x="24" y="44">Boxes and arrows are evidenced in the notes — nothing extra is invented</text>',
     ]
+
     for i, zone in enumerate(cols):
-        x = pad + i * col_w
-        parts.append(f'<text class="muted" x="{x}" y="54">{_xml(zone.upper())}</text>')
-        for j, comp in enumerate(grouped[zone]):
-            cy = 68 + j * row_h
-            positions[comp.id] = (x + 90, cy + 28)
-            parts.append(
-                f'<rect x="{x}" y="{cy}" width="190" height="58" rx="8" fill="#fffdf8" stroke="#0f6e62"/>'
-            )
-            parts.append(f'<text x="{x + 10}" y="{cy + 24}">{_xml(comp.name[:32])}</text>')
-            subtitle = comp.details[0] if comp.details else comp.kind.replace("_", " ")
-            parts.append(f'<text class="muted" x="{x + 10}" y="{cy + 42}">{_xml(subtitle[:34])}</text>')
+        x = PAD_X + i * COL_W - 10
+        zone_boxes = [
+            box
+            for box in boxes.values()
+            if (box.component.zone if box.component.zone in ZONE_TINT else "unspecified") == zone
+        ]
+        bottom = max((box.y + BOX_H for box in zone_boxes), default=120)
+        col_h = max(bottom - 42, 88)
+        tint = ZONE_TINT.get(zone, "#f1f3f5")
+        parts.append(
+            f'<rect x="{x}" y="54" width="{COL_W - 16}" height="{col_h:.0f}" rx="12" fill="{tint}" stroke="#e6dfd4"/>'
+        )
+        parts.append(f'<text class="zone muted" x="{x + 14}" y="74">{_xml(zone.upper())}</text>')
 
     for conn in connections:
-        if conn.source_id not in positions or conn.target_id not in positions:
+        src = boxes.get(conn.source_id)
+        dst = boxes.get(conn.target_id)
+        if src is None or dst is None:
             continue
-        x1, y1 = positions[conn.source_id]
-        x2, y2 = positions[conn.target_id]
+        offset = fan[(conn.source_id, conn.target_id)]
+        path = edge_path(src, dst, offset)
+        lx, ly = label_anchor(src, dst, offset)
         parts.append(
-            f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#3d4a5c" stroke-width="1.6" marker-end="url(#arrow)"/>'
+            f'<g class="edge" data-source="{_xml(conn.source_id)}" data-target="{_xml(conn.target_id)}">'
+            f"<title>{_xml(conn.source_id)} → {_xml(conn.target_id)} [{_xml(conn.rule)}] {_xml(conn.evidence[:160])}</title>"
+            f'<path d="{path}" fill="none" stroke="#3d4a5c" stroke-width="1.7" marker-end="url(#arrow)"/>'
+        )
+        if conn.label and conn.label != "described flow":
+            parts.append(
+                f'<text class="muted" x="{lx:.1f}" y="{ly:.1f}" text-anchor="middle">{_xml(conn.label)}</text>'
+            )
+        parts.append("</g>")
+
+    for box in boxes.values():
+        comp = box.component
+        stroke = KIND_STROKE.get(comp.kind, "#0f6e62")
+        quote = (
+            comp.evidence_spans[0].sentence
+            if comp.evidence_spans
+            else (comp.evidence[0] if comp.evidence else "")
+        )
+        subtitle = next((d for d in comp.details if not d.startswith("Matched:")), None) or comp.kind.replace(
+            "_", " "
         )
         parts.append(
-            f'<text class="muted" x="{(x1 + x2) / 2}" y="{(y1 + y2) / 2 - 8}">{_xml(conn.label)}</text>'
+            f'<g class="node" data-id="{_xml(comp.id)}" tabindex="0">'
+            f"<title>{_xml(comp.name)} — {_xml(quote[:180])}</title>"
+            f'<rect x="{box.x}" y="{box.y}" width="{BOX_W}" height="{BOX_H}" rx="10" fill="#fffdf8" stroke="{stroke}" stroke-width="1.8"/>'
+            f'<text x="{box.x + 12}" y="{box.y + 26}" font-weight="650">{_xml(comp.name[:30])}</text>'
+            f'<text class="muted" x="{box.x + 12}" y="{box.y + 44}">{_xml(subtitle[:32])}</text></g>'
         )
 
-    y = height - 16 - 20 * len(amb)
+    y = diagram_bottom + 18
     parts.append(f'<text class="muted" x="24" y="{y}">Ambiguous or insufficient information</text>')
-    for i, item in enumerate(amb):
-        parts.append(f'<text class="muted" x="24" y="{y + 18 + i * 18}">{_xml("- " + item[:120])}</text>')
+    for i, line in enumerate(amb_lines):
+        parts.append(f'<text class="muted" x="24" y="{y + 18 + i * 16}">{_xml("• " + line)}</text>')
     parts.append("</svg>")
     return "\n".join(parts)
+
+
+def _fan_offsets(connections: list[Connection]) -> dict[tuple[str, str], float]:
+    buckets: dict[str, list[tuple[str, str]]] = defaultdict(list)
+    for conn in connections:
+        buckets[conn.target_id].append((conn.source_id, conn.target_id))
+    offsets: dict[tuple[str, str], float] = {}
+    for edges in buckets.values():
+        mid = (len(edges) - 1) / 2
+        for i, key in enumerate(edges):
+            offsets[key] = (i - mid) * 22
+    return offsets
+
+
+def _defs() -> str:
+    return (
+        "<defs><marker id='arrow' markerWidth='9' markerHeight='9' refX='8' refY='3' orient='auto'>"
+        "<path d='M0,0 L8,3 L0,6 z' fill='#3d4a5c'/></marker></defs>"
+    )
 
 
 def _xml(text: str) -> str:

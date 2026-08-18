@@ -10,7 +10,10 @@ The load balancer distributes traffic to two application servers.
 
 
 def test_health() -> None:
-    assert client.get("/health").status_code == 200
+    body = client.get("/health").json()
+    assert body["status"] == "ok"
+    assert body["telemetry"] in {"disabled", "packages_missing", "otlp"}
+    assert body["llm"] in {"off", "missing_api_key", "openai"}
 
 
 def test_example_endpoint() -> None:
@@ -28,6 +31,21 @@ def test_generate() -> None:
     assert "invent" in body["disclaimer"].lower() or "invented" in body["disclaimer"].lower() or "inventing" not in body["disclaimer"].lower()
     names = [c["name"].lower() for c in body["components"]]
     assert any("firewall" in n for n in names)
+
+
+def test_examples_endpoint() -> None:
+    res = client.get("/examples")
+    assert res.status_code == 200
+    titles = [item["title"] for item in res.json()["examples"]]
+    assert any("Exercise" in t for t in titles)
+
+
+def test_generate_includes_mermaid() -> None:
+    res = client.post("/generate", json={"notes": NOTES})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["mermaid"].startswith("flowchart LR")
+    assert "firewall" in body["mermaid"]
 
 
 def test_svg_download() -> None:

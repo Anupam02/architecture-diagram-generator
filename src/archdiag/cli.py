@@ -5,7 +5,8 @@ import json
 import sys
 from pathlib import Path
 
-from archdiag.parse import interpret_notes
+from archdiag.llm import NullProposer
+from archdiag.pipeline import interpret_notes
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -15,7 +16,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("notes_path", nargs="?", help="Path to a notes text file")
     parser.add_argument("--text", help="Raw notes instead of a file")
     parser.add_argument("--svg", help="Write the SVG diagram to this path")
+    parser.add_argument("--mermaid", help="Write a Mermaid flowchart to this path")
     parser.add_argument("--pretty", action="store_true")
+    parser.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Force catalog-only extraction (ignore ARCHDIAG_LLM_PROVIDER).",
+    )
     args = parser.parse_args(argv)
 
     if args.text:
@@ -25,9 +32,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         parser.error("Provide a notes file or --text")
 
-    model = interpret_notes(notes)
+    proposer = NullProposer() if args.no_llm else None
+    model = interpret_notes(notes, proposer=proposer)
     if args.svg:
         Path(args.svg).write_text(model.svg, encoding="utf-8")
+    if args.mermaid:
+        Path(args.mermaid).write_text(model.mermaid, encoding="utf-8")
 
     dump = model.model_dump()
     dump.pop("svg", None)
