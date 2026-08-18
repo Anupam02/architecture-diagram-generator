@@ -13,6 +13,7 @@ def test_health() -> None:
     body = client.get("/health").json()
     assert body["status"] == "ok"
     assert body["telemetry"] in {"disabled", "packages_missing", "otlp"}
+    assert body["llm"] in {"off", "missing_api_key", "openai"}
 
 
 def test_example_endpoint() -> None:

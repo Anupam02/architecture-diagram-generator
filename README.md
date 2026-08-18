@@ -34,20 +34,32 @@ That is application-level traceability (why this architecture was drawn). It is 
 
 ## Are we using an LLM?
 
-**No.** Diagram generation does **not** call OpenAI, Anthropic, Gemini, or any other LLM.
+**By default, no.** Extraction is a deterministic catalog. Tests do not need an API key.
 
-There is no `OPENAI_API_KEY`, no chat completion, and no embedding model in this project.
+An **optional constrained LLM pass** can propose extra components. A separate `VerbatimSpanGate` is the authority: a proposal is kept **only if that phrase already appears as a contiguous quote in the notes**. Invented names (Redis when the notes never say Redis) are rejected and recorded on the extraction trace as `llm_rejected`.
 
-The pipeline is a **deterministic extractor**:
+```
+catalog matches
+    → optional LLM proposals
+    → verbatim gate (accept / reject)
+    → connection rules
+    → ambiguities
+    → SVG
+```
 
-- regular expressions against a **component catalog**
-- connection language in the same sentence (`connect`, `through`, `distributes`, `communicate`, `access` / `from`, `route`, …)
-- port/protocol tokens in that sentence
-- a simple zoned SVG layout
+Enable an OpenAI-compatible API:
 
-That is a deliberate trade-off: the behaviour is explainable in a technical interview, tests are stable without API keys, and the system cannot “hallucinate” a Redis box that was never mentioned. The cost is that product names **outside the catalog** are not drawn; they are treated as unknown rather than invented.
+```bash
+export ARCHDIAG_LLM_PROVIDER=openai
+export OPENAI_API_KEY=sk-...
+# optional:
+export ARCHDIAG_LLM_MODEL=gpt-4o-mini
+export OPENAI_BASE_URL=https://api.openai.com/v1
+```
 
-If this were production, an optional LLM could propose extra spans **only if those exact phrases appear in the notes**, with a human edit step before export.
+`GET /health` reports `llm`: `off`, `missing_api_key`, or `openai`. CLI: `--no-llm` forces catalog-only.
+
+The model is never trusted to add a box. That is the SOLID split: `SpanProposer` (OpenAI or a test double) vs `ConstrainedLlmMerger` (policy).
 
 ---
 
@@ -143,9 +155,9 @@ curl -s -X POST http://127.0.0.1:8001/generate \
 raw notes
     → split into sentences
     → match catalog phrases (only if they occur in the text)
+    → optional LLM proposals, kept only as verbatim spans
     → if a sentence has connection language and two+ known components,
-      add an arrow (word order + patterns such as "through A to B"
-      and "access to Y from X")
+      add an arrow (word order + named rules such as through_chain)
     → attach protocol/port from that sentence when present
     → collect ambiguities (missing ports, unnamed duplicates, …)
     → render a left-to-right zoned SVG
@@ -172,16 +184,21 @@ If a sentence has no connection verb, no arrow is created from that sentence.
 ## Project layout
 
 ```
-sample_notes/          fictional notes used for the demo
-src/archdiag/catalog.py  phrases recognised only when they appear in the notes
-src/archdiag/parse.py    component + connection extraction + audit trace
-src/archdiag/schema.py   components, flows, evidence spans, trace events
-src/archdiag/render.py   SVG layout with hover titles
-src/archdiag/telemetry.py optional OpenTelemetry (OTLP) spans
-src/archdiag/api.py      FastAPI + UI
-src/archdiag/cli.py      command line
-src/archdiag/static/     HTML page
-tests/                   pytest coverage of the example and API
+sample_notes/               fictional notes used for the demo
+src/archdiag/ports.py       interfaces (SOLID: depend on abstractions)
+src/archdiag/pipeline.py    orchestrates finder → LLM gate → linker → SVG
+src/archdiag/catalog.py     phrases recognised only when they appear
+src/archdiag/components.py  catalog matching
+src/archdiag/connections.py named connection rules (open for extension)
+src/archdiag/ambiguities.py missing-detail flags
+src/archdiag/llm.py         proposer + verbatim gate
+src/archdiag/parse.py       public facade (`interpret_notes`)
+src/archdiag/schema.py      API models and extraction trace
+src/archdiag/render.py      SVG layout
+src/archdiag/telemetry.py   optional OpenTelemetry (OTLP) spans
+src/archdiag/api.py         FastAPI + UI
+src/archdiag/static/        HTML page
+tests/
 ```
 
 ---
@@ -204,17 +221,18 @@ tests/                   pytest coverage of the example and API
 
 | Decision | Why |
 | --- | --- |
-| No LLM | Explainable, offline, no invented infrastructure, easy to test |
-| Catalog + regex rather than a general NER model | Precision over recall for this exercise; missing a rare product is better than drawing a fake one |
+| Catalog by default | Explainable, offline, no invented infrastructure, tests without keys |
+| Optional LLM behind a verbatim gate | Recall for names outside the catalog without letting the model invent boxes |
+| Injected ports (`SpanProposer`, `ConnectionLinker`, …) | SOLID: swap OpenAI, a stub, or a new connection rule without rewriting the pipeline |
 | SVG rather than PNG-only | Vector download, no extra rendering binary |
 | FastAPI + one HTML page | Meets “usable application” without a heavy frontend |
-| Heuristic arrow direction | Good enough for the exercise example; odd wording can reverse an arrow (called out as a limitation) |
+| Heuristic arrow direction | Good enough for the exercise example; odd wording can reverse an arrow |
 
 ---
 
 ## Limitations
 
-- Names that are not in the catalog are not drawn (by design).
+- Names that are not in the catalog are not drawn unless the optional LLM pass is on **and** the phrase is a verbatim quote.
 - Unusual sentence structure can attach the wrong direction to an arrow.
 - Two unnamed application servers become **one logical group**, with an ambiguity note.
 - Layout is a simple column grid, not a polished network drawing tool.
@@ -222,10 +240,9 @@ tests/                   pytest coverage of the example and API
 
 ## What I would change for production
 
-- Optional LLM pass **constrained** to verbatim spans from the notes, then a human graph editor.
+- Human graph editor (delete/rename a node before download).
 - PNG/PDF export, collision-free layout, and grouping of identical nodes.
-- A larger, tested catalog (cloud load balancers, Kubernetes, message buses) with evaluation notes.
-- Audit log of which sentence produced which box and arrow (now in `extraction_trace`; keep it if you add an LLM pass).
+- A labelled eval set (precision/recall of catalog vs gated LLM).
 
 ---
 
@@ -238,20 +255,32 @@ tests/                   pytest coverage of the example and API
 5. Click a box or table row and show the matching sentence plus the extraction trace.
 6. Show that Redis/CDN are absent.
 7. Download the SVG.
-8. State clearly: **no LLM was used**; every element is evidenced in the notes.
+8. State clearly: **the catalog is the default**; an LLM cannot add a box unless the phrase is a verbatim quote (`llm_accepted` / `llm_rejected` on the trace).
+9. Optional: load `sample_notes/eks_cluster.txt` with a stub/LLM to show EKS accepted and Redis rejected.
 
 ---
 
 ## How you can improve this further
 
-Keep precision first: do not invent boxes. Useful next steps, in order of interview payoff:
+Keep precision first: do not invent boxes. Useful next steps:
 
-1. **Constrained LLM pass** — propose extra component spans only if the exact phrase appears in the notes; merge with the catalog; keep the extraction trace so you can still explain every arrow.
-2. **Human graph editor** — let the presenter drag, drop, or delete a node before download (production architectures are never fully automatic).
-3. **Evaluation set** — 10–20 labelled notes (expected component ids + edges). Track precision/recall of catalog vs LLM. The exercise example is one fixture; it is not a benchmark.
-4. **Richer layout** — Graphviz/dot or ElkJS if the SVG overlaps on larger graphs.
-5. **Catalog growth from failures** — when a demo note misses WAF/EKS/Oracle, add a tested synonym rather than loosening regexes globally.
-6. **Observability of the app itself** — export OpenTelemetry spans to an open-source Datadog-style backend (below). That is how you debug latency and `/generate` failures, not how you explain a firewall box.
+1. **Human graph editor** — drag, drop, or delete a node before download.
+2. **Evaluation set** — 10–20 labelled notes; precision/recall for catalog vs gated LLM.
+3. **Richer layout** — Graphviz if SVG arrows overlap.
+4. **Catalog growth from failures** — add a tested synonym rather than loosening regexes globally.
+5. **Observability of the app** — OpenTelemetry to SigNoz/Grafana (below).
+
+## SOLID and clean code
+
+| Principle | How it shows up |
+| --- | --- |
+| **S**ingle responsibility | Catalog matching, connection rules, ambiguity flags, verbatim gate, SVG, and HTTP are separate modules |
+| **O**pen/closed | Add a `ConnectionRule` (see `tests/test_connections.py`) without editing the linker loop |
+| **L**iskov | `NullProposer`, `StaticProposer`, and `OpenAiCompatibleProposer` all return `ProposedComponent` lists; the gate treats them the same |
+| **I**nterface segregation | Small ports in `ports.py` (`ComponentFinder`, `SpanProposer`, `ConnectionLinker`, `DiagramRenderer`) instead of one “engine” interface |
+| **D**ependency inversion | `ArchitecturePipeline` depends on ports. Tests inject `StaticProposer`; production may inject OpenAI |
+
+The previous design put finding, linking, and SVG in one `parse.py` procedure. That made the LLM gate hard to test without calling a vendor. The pipeline constructor is the seam.
 
 ## Traceability (already in this repo)
 

@@ -4,4 +4,4 @@ from archdiag.parse import interpret_notes
 from archdiag.schema import ArchitectureDiagram
 
 __all__ = ["interpret_notes", "ArchitectureDiagram"]
-__version__ = "0.2.0"
+__version__ = "0.3.0"

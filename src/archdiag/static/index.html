@@ -86,7 +86,7 @@
   <header>
     <h1>Use Case 2 — Architecture diagram generation</h1>
     <p class="muted">Paste unstructured technical notes. The app extracts only components and flows that the notes support, then draws a downloadable diagram.</p>
-    <div class="banner">Nothing is invented. Click a box, row, or sentence to see the quote and rule that produced it.</div>
+    <div class="banner">Nothing is invented. Catalog matches plus optional LLM proposals that appear as verbatim quotes. Click a box, row, or sentence to see the rule that produced it.</div>
   </header>
   <main>
     <section class="panel">
@@ -175,6 +175,7 @@
       out.innerHTML = `
         <section class="panel">
           <p class="muted">${escapeHtml(data.disclaimer)}</p>
+          <p class="muted">LLM proposer: ${escapeHtml(data.llm_provider || "off")} — accepted ${escapeHtml(data.llm_accepted)} , rejected ${escapeHtml(data.llm_rejected)}. Proposals are kept only when the phrase appears verbatim in the notes.</p>
           <button type="button" id="download">Download SVG</button>
           <div class="diagram">${data.svg}</div>
         </section>

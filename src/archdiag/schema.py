@@ -4,6 +4,15 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+TraceAction = Literal[
+    "matched_component",
+    "linked_flow",
+    "flagged_ambiguity",
+    "ignored_sentence",
+    "llm_accepted",
+    "llm_rejected",
+]
+
 
 class EvidenceSpan(BaseModel):
     """One quote from the notes that justified a component."""
@@ -15,15 +24,10 @@ class EvidenceSpan(BaseModel):
 
 
 class TraceEvent(BaseModel):
-    """One auditable extraction decision (component, flow, skip, or ambiguity)."""
+    """One auditable extraction decision."""
 
     event_id: str
-    action: Literal[
-        "matched_component",
-        "linked_flow",
-        "flagged_ambiguity",
-        "ignored_sentence",
-    ]
+    action: TraceAction
     rule: str
     summary: str
     sentence_index: int | None = None
@@ -60,8 +64,12 @@ class ArchitectureDiagram(BaseModel):
     unused_sentences: list[str]
     sentences: list[str] = Field(default_factory=list)
     extraction_trace: list[TraceEvent] = Field(default_factory=list)
+    llm_provider: str = "off"
+    llm_accepted: int = 0
+    llm_rejected: int = 0
     svg: str
     disclaimer: str = (
         "This diagram only includes components and connections supported by the notes. "
+        "LLM proposals are kept only when the phrase appears verbatim. "
         "Missing detail is listed as ambiguous rather than invented."
     )

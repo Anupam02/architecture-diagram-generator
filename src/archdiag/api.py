@@ -6,6 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
+from archdiag.llm import llm_status
 from archdiag.parse import interpret_notes
 from archdiag.schema import ArchitectureDiagram
 from archdiag.telemetry import init_telemetry, span as otel_span
@@ -21,7 +22,7 @@ app = FastAPI(
         "Use Case 2: turn unstructured technical notes into a visual architecture diagram. "
         "Components and connections are taken only from the notes."
     ),
-    version="0.2.0",
+    version="0.3.0",
 )
 
 
@@ -31,7 +32,7 @@ class NotesRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "telemetry": _telemetry_status}
+    return {"status": "ok", "telemetry": _telemetry_status, "llm": llm_status()}
 
 
 @app.get("/example")

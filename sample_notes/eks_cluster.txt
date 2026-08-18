@@ -1,0 +1,2 @@
+Mobile clients reach an EKS cluster through an API gateway.
+The API gateway forwards traffic to application servers.
