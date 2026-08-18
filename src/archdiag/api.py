@@ -8,9 +8,12 @@ from pydantic import BaseModel, Field
 
 from archdiag.parse import interpret_notes
 from archdiag.schema import ArchitectureDiagram
+from archdiag.telemetry import init_telemetry, span as otel_span
 
 STATIC_DIR = Path(__file__).parent / "static"
 EXAMPLE_PATH = Path(__file__).resolve().parents[2] / "sample_notes" / "exercise_example.txt"
+
+_telemetry_status = init_telemetry()
 
 app = FastAPI(
     title="Architecture Diagram Generator",
@@ -18,7 +21,7 @@ app = FastAPI(
         "Use Case 2: turn unstructured technical notes into a visual architecture diagram. "
         "Components and connections are taken only from the notes."
     ),
-    version="0.1.0",
+    version="0.2.0",
 )
 
 
@@ -28,7 +31,7 @@ class NotesRequest(BaseModel):
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "telemetry": _telemetry_status}
 
 
 @app.get("/example")
@@ -40,18 +43,20 @@ def example() -> dict[str, str]:
 
 @app.post("/generate", response_model=ArchitectureDiagram)
 def generate(payload: NotesRequest) -> ArchitectureDiagram:
-    try:
-        return interpret_notes(payload.notes)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with otel_span("archdiag.http.generate", notes_chars=len(payload.notes)):
+        try:
+            return interpret_notes(payload.notes)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @app.post("/generate.svg")
 def generate_svg(payload: NotesRequest) -> Response:
-    try:
-        model = interpret_notes(payload.notes)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    with otel_span("archdiag.http.generate_svg", notes_chars=len(payload.notes)):
+        try:
+            model = interpret_notes(payload.notes)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(
         content=model.svg,
         media_type="image/svg+xml",

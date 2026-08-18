@@ -10,7 +10,9 @@ The load balancer distributes traffic to two application servers.
 
 
 def test_health() -> None:
-    assert client.get("/health").status_code == 200
+    body = client.get("/health").json()
+    assert body["status"] == "ok"
+    assert body["telemetry"] in {"disabled", "packages_missing", "otlp"}
 
 
 def test_example_endpoint() -> None:

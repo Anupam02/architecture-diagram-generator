@@ -36,12 +36,17 @@ def render_svg(
         for j, comp in enumerate(grouped[zone]):
             cy = 68 + j * row_h
             positions[comp.id] = (x + 90, cy + 28)
+            quote = comp.evidence_spans[0].sentence if comp.evidence_spans else (comp.evidence[0] if comp.evidence else "")
             parts.append(
+                f'<g class="node" data-id="{_xml(comp.id)}" tabindex="0">'
+                f'<title>{_xml(comp.name)} — {_xml(quote[:180])}</title>'
                 f'<rect x="{x}" y="{cy}" width="190" height="58" rx="8" fill="#fffdf8" stroke="#0f6e62"/>'
+                f'<text x="{x + 10}" y="{cy + 24}">{_xml(comp.name[:32])}</text>'
             )
-            parts.append(f'<text x="{x + 10}" y="{cy + 24}">{_xml(comp.name[:32])}</text>')
-            subtitle = comp.details[0] if comp.details else comp.kind.replace("_", " ")
-            parts.append(f'<text class="muted" x="{x + 10}" y="{cy + 42}">{_xml(subtitle[:34])}</text>')
+            subtitle = next((d for d in comp.details if not d.startswith("Matched:")), None) or comp.kind.replace(
+                "_", " "
+            )
+            parts.append(f'<text class="muted" x="{x + 10}" y="{cy + 42}">{_xml(subtitle[:34])}</text></g>')
 
     for conn in connections:
         if conn.source_id not in positions or conn.target_id not in positions:
@@ -49,10 +54,10 @@ def render_svg(
         x1, y1 = positions[conn.source_id]
         x2, y2 = positions[conn.target_id]
         parts.append(
+            f'<g class="edge" data-source="{_xml(conn.source_id)}" data-target="{_xml(conn.target_id)}">'
+            f"<title>{_xml(conn.source_id)} → {_xml(conn.target_id)} [{_xml(conn.rule)}] {_xml(conn.evidence[:160])}</title>"
             f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#3d4a5c" stroke-width="1.6" marker-end="url(#arrow)"/>'
-        )
-        parts.append(
-            f'<text class="muted" x="{(x1 + x2) / 2}" y="{(y1 + y2) / 2 - 8}">{_xml(conn.label)}</text>'
+            f'<text class="muted" x="{(x1 + x2) / 2}" y="{(y1 + y2) / 2 - 8}">{_xml(conn.label)}</text></g>'
         )
 
     y = height - 16 - 20 * len(amb)

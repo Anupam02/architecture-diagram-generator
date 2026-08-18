@@ -13,6 +13,7 @@
       --accent: #0f6e62;
       --warn: #7a4b00;
       --line: #d9d1c3;
+      --hi: #d8efe9;
     }
     * { box-sizing: border-box; }
     body {
@@ -24,6 +25,7 @@
     }
     header, main { max-width: 1100px; margin: 0 auto; padding: 20px; }
     h1 { font-size: 1.5rem; margin: 0 0 6px; }
+    h2 { font-size: 1.15rem; margin: 0 0 8px; }
     .banner {
       background: #fff6e8;
       border: 1px solid #e6d3ae;
@@ -60,17 +62,31 @@
     }
     button.secondary { background: #3d4a5c; }
     .muted { color: var(--muted); }
-    .card { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 8px 0; background: #fff; }
     table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
     th, td { border-bottom: 1px solid var(--line); text-align: left; padding: 6px; vertical-align: top; }
+    tr.clickable { cursor: pointer; }
+    tr.clickable:hover, tr.selected { background: var(--hi); }
     .diagram { overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+    .sentence { padding: 8px; border-left: 3px solid var(--line); margin: 6px 0; background: #fff; }
+    .sentence.active { border-left-color: var(--accent); background: var(--hi); }
+    .chip {
+      display: inline-block;
+      background: #e7f3f0;
+      color: var(--accent);
+      border-radius: 999px;
+      padding: 1px 8px;
+      font-size: 0.8rem;
+      margin-right: 4px;
+    }
+    .trace { font-size: 0.92rem; }
+    .trace li { margin: 6px 0; }
   </style>
 </head>
 <body>
   <header>
     <h1>Use Case 2 — Architecture diagram generation</h1>
     <p class="muted">Paste unstructured technical notes. The app extracts only components and flows that the notes support, then draws a downloadable diagram.</p>
-    <div class="banner">Nothing is invented. Ambiguous or missing detail is listed instead of guessed.</div>
+    <div class="banner">Nothing is invented. Click a box, row, or sentence to see the quote and rule that produced it.</div>
   </header>
   <main>
     <section class="panel">
@@ -114,22 +130,48 @@
       }
     };
 
+    function selectSentence(index) {
+      document.querySelectorAll(".sentence").forEach((el) => {
+        el.classList.toggle("active", Number(el.dataset.index) === index);
+      });
+      const target = document.querySelector(`.sentence[data-index="${index}"]`);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
+
     function render(data) {
-      const components = data.components.map(c => `
-        <tr>
+      const sentences = data.sentences || [];
+      const components = data.components.map(c => {
+        const span = (c.evidence_spans || [])[0];
+        const idx = span ? span.sentence_index : "";
+        const matched = (c.evidence_spans || []).map(s => s.matched_text).join(", ");
+        return `
+        <tr class="clickable" data-sentence="${idx}">
           <td>${escapeHtml(c.name)}</td>
           <td>${escapeHtml(c.kind)}</td>
           <td>${escapeHtml(c.zone)}</td>
-          <td>${escapeHtml((c.details || []).join("; "))}</td>
+          <td>${escapeHtml(matched)}</td>
           <td class="muted">${escapeHtml((c.evidence || []).join(" "))}</td>
-        </tr>`).join("");
+        </tr>`;
+      }).join("");
       const connections = data.connections.map(c => `
-        <tr>
+        <tr class="clickable" data-sentence="${escapeHtml(c.sentence_index)}">
           <td>${escapeHtml(c.source_id)} → ${escapeHtml(c.target_id)}</td>
           <td>${escapeHtml(c.label)}</td>
+          <td><span class="chip">${escapeHtml(c.rule)}</span></td>
           <td class="muted">${escapeHtml(c.evidence)}</td>
         </tr>`).join("");
       const amb = (data.ambiguities || []).map(a => `<li>${escapeHtml(a)}</li>`).join("") || "<li>None flagged.</li>";
+      const sentenceBlock = sentences.map((s, i) => {
+        const related = (data.extraction_trace || []).filter(e => e.sentence_index === i && e.action !== "ignored_sentence");
+        const chips = related.map(e => `<span class="chip">${escapeHtml(e.rule)}</span>`).join("");
+        return `<div class="sentence" data-index="${i}"><strong>S${i + 1}.</strong> ${escapeHtml(s)}<div>${chips}</div></div>`;
+      }).join("");
+      const trace = (data.extraction_trace || []).map(e => `
+        <li data-sentence="${e.sentence_index ?? ""}">
+          <span class="chip">${escapeHtml(e.action)}</span>
+          <span class="chip">${escapeHtml(e.rule)}</span>
+          ${escapeHtml(e.summary)}
+        </li>`).join("");
       out.innerHTML = `
         <section class="panel">
           <p class="muted">${escapeHtml(data.disclaimer)}</p>
@@ -137,22 +179,32 @@
           <div class="diagram">${data.svg}</div>
         </section>
         <section class="panel">
+          <h2>Notes with extraction links</h2>
+          <p class="muted">Each sentence is tagged with the catalog or connection rule that fired.</p>
+          ${sentenceBlock || "<p class='muted'>No sentences.</p>"}
+        </section>
+        <section class="panel">
           <h2>Components found in the notes</h2>
           <table>
-            <thead><tr><th>Name</th><th>Kind</th><th>Zone</th><th>Details</th><th>Evidence</th></tr></thead>
+            <thead><tr><th>Name</th><th>Kind</th><th>Zone</th><th>Matched phrase</th><th>Evidence</th></tr></thead>
             <tbody>${components}</tbody>
           </table>
         </section>
         <section class="panel">
           <h2>Connections</h2>
           <table>
-            <thead><tr><th>Flow</th><th>Protocol / port</th><th>Evidence</th></tr></thead>
+            <thead><tr><th>Flow</th><th>Protocol / port</th><th>Rule</th><th>Evidence</th></tr></thead>
             <tbody>${connections}</tbody>
           </table>
         </section>
         <section class="panel">
           <h2>Ambiguous or insufficient information</h2>
           <ul>${amb}</ul>
+        </section>
+        <section class="panel">
+          <h2>Extraction trace</h2>
+          <p class="muted">Ordered decisions used to build the diagram. This is the audit trail for the interview demo.</p>
+          <ol class="trace">${trace}</ol>
         </section>
       `;
       document.getElementById("download").onclick = () => {
@@ -164,6 +216,24 @@
         a.click();
         URL.revokeObjectURL(url);
       };
+      out.querySelectorAll("tr.clickable, .trace li").forEach((el) => {
+        el.addEventListener("click", () => {
+          const idx = Number(el.dataset.sentence);
+          if (Number.isFinite(idx)) selectSentence(idx);
+        });
+      });
+      out.querySelectorAll(".sentence").forEach((el) => {
+        el.addEventListener("click", () => selectSentence(Number(el.dataset.index)));
+      });
+      out.querySelectorAll("g.node").forEach((el) => {
+        el.style.cursor = "pointer";
+        el.addEventListener("click", () => {
+          const id = el.getAttribute("data-id");
+          const comp = (data.components || []).find((c) => c.id === id);
+          const span = comp && (comp.evidence_spans || [])[0];
+          if (span) selectSentence(span.sentence_index);
+        });
+      });
     }
   </script>
 </body>

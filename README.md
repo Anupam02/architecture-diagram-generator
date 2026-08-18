@@ -21,7 +21,14 @@ You paste raw notes (the kind an engineer might scribble after a design conversa
 7. **Does not invent** boxes, products, or arrows that the notes do not support.
 8. Lists **ambiguous or insufficient information** instead of guessing (for example “monitoring ports” with no numbers).
 
-Every box and arrow is tied to an **evidence sentence** from the notes so you can see why it was drawn.
+Every box and arrow is tied to an **evidence sentence** from the notes so you can see why it was drawn. The UI also shows:
+
+- the **matched phrase** (the catalog span)
+- the **connection rule** (`through_chain`, `then_chain`, `access_from`, …)
+- an **extraction trace** — ordered decisions from notes → diagram
+- click-through from a diagram node or table row to the source sentence
+
+That is application-level traceability (why this architecture was drawn). It is separate from APM traces you might send to SigNoz or Grafana (see below).
 
 ---
 
@@ -85,7 +92,7 @@ Open **http://127.0.0.1:8001**
 
 1. Click **Load exercise example** (or paste your own notes).
 2. Click **Generate diagram**.
-3. Read the diagram, the component table, the connection table, and the ambiguity list.
+3. Read the diagram, the component table, the connection table, the sentence links, the extraction trace, and the ambiguity list.
 4. Click **Download SVG** to save `architecture.svg`.
 
 That is the intended user experience: paste notes → run → inspect evidence → download the picture.
@@ -166,12 +173,15 @@ If a sentence has no connection verb, no arrow is created from that sentence.
 
 ```
 sample_notes/          fictional notes used for the demo
-src/archdiag/parse.py  component + connection extraction
-src/archdiag/render.py SVG layout
-src/archdiag/api.py    FastAPI + UI
-src/archdiag/cli.py    command line
-src/archdiag/static/   HTML page
-tests/                 pytest coverage of the example and API
+src/archdiag/catalog.py  phrases recognised only when they appear in the notes
+src/archdiag/parse.py    component + connection extraction + audit trace
+src/archdiag/schema.py   components, flows, evidence spans, trace events
+src/archdiag/render.py   SVG layout with hover titles
+src/archdiag/telemetry.py optional OpenTelemetry (OTLP) spans
+src/archdiag/api.py      FastAPI + UI
+src/archdiag/cli.py      command line
+src/archdiag/static/     HTML page
+tests/                   pytest coverage of the example and API
 ```
 
 ---
@@ -215,7 +225,7 @@ tests/                 pytest coverage of the example and API
 - Optional LLM pass **constrained** to verbatim spans from the notes, then a human graph editor.
 - PNG/PDF export, collision-free layout, and grouping of identical nodes.
 - A larger, tested catalog (cloud load balancers, Kubernetes, message buses) with evaluation notes.
-- Audit log of which sentence produced which box and arrow.
+- Audit log of which sentence produced which box and arrow (now in `extraction_trace`; keep it if you add an LLM pass).
 
 ---
 
@@ -225,6 +235,58 @@ tests/                 pytest coverage of the example and API
 2. Start the UI, load the exercise example, generate.
 3. Point at HTTPS/443 and PostgreSQL/5432 on the arrows.
 4. Point at the ambiguity list (monitoring ports, two unnamed app servers).
-5. Show that Redis/CDN are absent.
-6. Download the SVG.
-7. State clearly: **no LLM was used**; every element is evidenced in the notes.
+5. Click a box or table row and show the matching sentence plus the extraction trace.
+6. Show that Redis/CDN are absent.
+7. Download the SVG.
+8. State clearly: **no LLM was used**; every element is evidenced in the notes.
+
+---
+
+## How you can improve this further
+
+Keep precision first: do not invent boxes. Useful next steps, in order of interview payoff:
+
+1. **Constrained LLM pass** — propose extra component spans only if the exact phrase appears in the notes; merge with the catalog; keep the extraction trace so you can still explain every arrow.
+2. **Human graph editor** — let the presenter drag, drop, or delete a node before download (production architectures are never fully automatic).
+3. **Evaluation set** — 10–20 labelled notes (expected component ids + edges). Track precision/recall of catalog vs LLM. The exercise example is one fixture; it is not a benchmark.
+4. **Richer layout** — Graphviz/dot or ElkJS if the SVG overlaps on larger graphs.
+5. **Catalog growth from failures** — when a demo note misses WAF/EKS/Oracle, add a tested synonym rather than loosening regexes globally.
+6. **Observability of the app itself** — export OpenTelemetry spans to an open-source Datadog-style backend (below). That is how you debug latency and `/generate` failures, not how you explain a firewall box.
+
+## Traceability (already in this repo)
+
+There are two different “traces”:
+
+| Kind | What it answers | Where |
+| --- | --- | --- |
+| Extraction trace | Why is this box/arrow on the diagram? | `extraction_trace`, evidence spans, UI sentence list |
+| APM / distributed trace | How long did `/generate` take? Did OTLP export fail? | OpenTelemetry → SigNoz / Grafana / Jaeger |
+
+Do not mix them in the demo. Use the extraction trace for the architecture story. Use OTLP only if you want to show you can operate the service.
+
+## Open-source alternatives similar to Datadog
+
+Datadog is a hosted APM + metrics + logs + service-map product. You do not need it for this exercise. If you want the same *job* (see request traces, latency, errors) with open source:
+
+| Tool | Closest Datadog feature | Why it fits |
+| --- | --- | --- |
+| **[SigNoz](https://signoz.io/)** | APM UI, traces, logs, metrics in one product | Strongest “Datadog-like” OSS option; native OpenTelemetry |
+| **Grafana LGTM** ([Tempo](https://grafana.com/oss/tempo/) + Loki + Prometheus + Grafana) | Dashboards, trace-to-logs | Very common in industry; slightly more assembly |
+| **[Jaeger](https://www.jaegertracing.io/)** | Distributed tracing | Simple if you only need traces |
+| **[Uptrace](https://uptrace.dev/)** | APM on OpenTelemetry | Lightweight OTLP backend |
+| **[Apache SkyWalking](https://skywalking.apache.org/)** | Service maps, APM | Useful if you later draw live service maps from traffic, not from notes |
+
+This app speaks **OpenTelemetry (OTLP HTTP)**. Install extras and point at any of the backends above (or Datadog’s OTLP intake, if you had a key):
+
+```bash
+python -m pip install -e ".[otel]"
+export OTEL_SERVICE_NAME=architecture-diagram-generator
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318
+python -m uvicorn archdiag.api:app --port 8001
+```
+
+`GET /health` reports `telemetry`: `disabled`, `packages_missing`, or `otlp`.
+
+SigNoz local example: run their Docker install, use OTLP port **4318**, generate a diagram, then open the `architecture-diagram-generator` service and the `archdiag.http.generate` span.
+
+A live Datadog/SigNoz **service map** is not a substitute for Use Case 2. Service maps come from runtime traffic. This exercise must draw architecture from **unstructured notes**, including boxes that have never emitted a span.
