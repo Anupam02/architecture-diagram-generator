@@ -33,6 +33,21 @@ def test_generate() -> None:
     assert any("firewall" in n for n in names)
 
 
+def test_examples_endpoint() -> None:
+    res = client.get("/examples")
+    assert res.status_code == 200
+    titles = [item["title"] for item in res.json()["examples"]]
+    assert any("Exercise" in t for t in titles)
+
+
+def test_generate_includes_mermaid() -> None:
+    res = client.post("/generate", json={"notes": NOTES})
+    assert res.status_code == 200
+    body = res.json()
+    assert body["mermaid"].startswith("flowchart LR")
+    assert "firewall" in body["mermaid"]
+
+
 def test_svg_download() -> None:
     res = client.post("/generate.svg", json={"notes": NOTES})
     assert res.status_code == 200

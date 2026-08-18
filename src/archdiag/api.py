@@ -12,7 +12,14 @@ from archdiag.schema import ArchitectureDiagram
 from archdiag.telemetry import init_telemetry, span as otel_span
 
 STATIC_DIR = Path(__file__).parent / "static"
-EXAMPLE_PATH = Path(__file__).resolve().parents[2] / "sample_notes" / "exercise_example.txt"
+SAMPLES_DIR = Path(__file__).resolve().parents[2] / "sample_notes"
+
+_EXAMPLES = (
+    ("exercise", "Exercise example", "exercise_example.txt"),
+    ("api-cache", "API gateway + cache", "api_gateway_cache.txt"),
+    ("fresh", "Fresh vocabulary", "fresh_vocabulary.txt"),
+    ("eks", "EKS (needs LLM or verbatim span)", "eks_cluster.txt"),
+)
 
 _telemetry_status = init_telemetry()
 
@@ -22,7 +29,7 @@ app = FastAPI(
         "Use Case 2: turn unstructured technical notes into a visual architecture diagram. "
         "Components and connections are taken only from the notes."
     ),
-    version="0.3.0",
+    version="0.4.0",
 )
 
 
@@ -37,9 +44,20 @@ def health() -> dict[str, str]:
 
 @app.get("/example")
 def example() -> dict[str, str]:
-    if EXAMPLE_PATH.exists():
-        return {"notes": EXAMPLE_PATH.read_text(encoding="utf-8")}
+    path = SAMPLES_DIR / "exercise_example.txt"
+    if path.exists():
+        return {"notes": path.read_text(encoding="utf-8")}
     return {"notes": ""}
+
+
+@app.get("/examples")
+def examples() -> dict[str, list[dict[str, str]]]:
+    items: list[dict[str, str]] = []
+    for ident, title, filename in _EXAMPLES:
+        path = SAMPLES_DIR / filename
+        if path.exists():
+            items.append({"id": ident, "title": title, "notes": path.read_text(encoding="utf-8")})
+    return {"examples": items}
 
 
 @app.post("/generate", response_model=ArchitectureDiagram)

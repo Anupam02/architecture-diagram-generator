@@ -23,7 +23,7 @@
       color: var(--ink);
       line-height: 1.45;
     }
-    header, main { max-width: 1100px; margin: 0 auto; padding: 20px; }
+    header, main { max-width: 1140px; margin: 0 auto; padding: 20px; }
     h1 { font-size: 1.5rem; margin: 0 0 6px; }
     h2 { font-size: 1.15rem; margin: 0 0 8px; }
     .banner {
@@ -67,7 +67,7 @@
     tr.clickable { cursor: pointer; }
     tr.clickable:hover, tr.selected { background: var(--hi); }
     .diagram { overflow: auto; background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
-    .sentence { padding: 8px; border-left: 3px solid var(--line); margin: 6px 0; background: #fff; }
+    .sentence { padding: 8px; border-left: 3px solid var(--line); margin: 6px 0; background: #fff; cursor: pointer; }
     .sentence.active { border-left-color: var(--accent); background: var(--hi); }
     .chip {
       display: inline-block;
@@ -79,7 +79,8 @@
       margin-right: 4px;
     }
     .trace { font-size: 0.92rem; }
-    .trace li { margin: 6px 0; }
+    .trace li { margin: 6px 0; cursor: pointer; }
+    details { margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -92,8 +93,8 @@
     <section class="panel">
       <label for="notes">Technical notes</label>
       <textarea id="notes" placeholder="Paste notes here"></textarea>
+      <div id="samples"></div>
       <div>
-        <button class="secondary" type="button" id="example">Load exercise example</button>
         <button type="button" id="run">Generate diagram</button>
       </div>
     </section>
@@ -102,6 +103,8 @@
   <script>
     const notes = document.getElementById("notes");
     const out = document.getElementById("out");
+    let lastData = null;
+    const nameById = () => Object.fromEntries((lastData?.components || []).map((c) => [c.id, c.name]));
 
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
@@ -109,11 +112,27 @@
       }[ch]));
     }
 
-    document.getElementById("example").onclick = async () => {
-      const res = await fetch("/example");
-      const data = await res.json();
-      notes.value = data.notes || "";
-    };
+    function download(filename, text, type) {
+      const blob = new Blob([text], { type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    fetch("/examples").then((res) => res.json()).then((data) => {
+      const holder = document.getElementById("samples");
+      (data.examples || []).forEach((ex) => {
+        const btn = document.createElement("button");
+        btn.className = "secondary";
+        btn.type = "button";
+        btn.textContent = ex.title;
+        btn.onclick = () => { notes.value = ex.notes; };
+        holder.appendChild(btn);
+      });
+    }).catch(() => {});
 
     document.getElementById("run").onclick = async () => {
       out.innerHTML = "<p class='muted'>Interpreting notes…</p>";
@@ -134,11 +153,25 @@
       document.querySelectorAll(".sentence").forEach((el) => {
         el.classList.toggle("active", Number(el.dataset.index) === index);
       });
+      const names = nameById();
+      out.querySelectorAll("g.node").forEach((el) => {
+        const id = el.getAttribute("data-id");
+        const comp = (lastData?.components || []).find((c) => c.id === id);
+        const hit = (comp?.evidence_spans || []).some((s) => s.sentence_index === index);
+        const rect = el.querySelector("rect");
+        if (rect) rect.setAttribute("stroke-width", hit ? "3.2" : "1.8");
+      });
+      out.querySelectorAll("tr.clickable").forEach((el) => {
+        el.classList.toggle("selected", Number(el.dataset.sentence) === index);
+      });
       const target = document.querySelector(`.sentence[data-index="${index}"]`);
       if (target) target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      void names;
     }
 
     function render(data) {
+      lastData = data;
+      const names = Object.fromEntries((data.components || []).map((c) => [c.id, c.name]));
       const sentences = data.sentences || [];
       const components = data.components.map(c => {
         const span = (c.evidence_spans || [])[0];
@@ -155,7 +188,7 @@
       }).join("");
       const connections = data.connections.map(c => `
         <tr class="clickable" data-sentence="${escapeHtml(c.sentence_index)}">
-          <td>${escapeHtml(c.source_id)} → ${escapeHtml(c.target_id)}</td>
+          <td>${escapeHtml(names[c.source_id] || c.source_id)} → ${escapeHtml(names[c.target_id] || c.target_id)}</td>
           <td>${escapeHtml(c.label)}</td>
           <td><span class="chip">${escapeHtml(c.rule)}</span></td>
           <td class="muted">${escapeHtml(c.evidence)}</td>
@@ -175,13 +208,14 @@
       out.innerHTML = `
         <section class="panel">
           <p class="muted">${escapeHtml(data.disclaimer)}</p>
-          <p class="muted">LLM proposer: ${escapeHtml(data.llm_provider || "off")} — accepted ${escapeHtml(data.llm_accepted)} , rejected ${escapeHtml(data.llm_rejected)}. Proposals are kept only when the phrase appears verbatim in the notes.</p>
+          <p class="muted">LLM proposer: ${escapeHtml(data.llm_provider || "off")} — accepted ${escapeHtml(data.llm_accepted)}, rejected ${escapeHtml(data.llm_rejected)}.</p>
           <button type="button" id="download">Download SVG</button>
+          <button class="secondary" type="button" id="download-mmd">Download Mermaid</button>
           <div class="diagram">${data.svg}</div>
         </section>
         <section class="panel">
           <h2>Notes with extraction links</h2>
-          <p class="muted">Each sentence is tagged with the catalog or connection rule that fired.</p>
+          <p class="muted">Click a sentence to highlight the boxes it produced.</p>
           ${sentenceBlock || "<p class='muted'>No sentences.</p>"}
         </section>
         <section class="panel">
@@ -203,20 +237,15 @@
           <ul>${amb}</ul>
         </section>
         <section class="panel">
-          <h2>Extraction trace</h2>
-          <p class="muted">Ordered decisions used to build the diagram. This is the audit trail for the interview demo.</p>
-          <ol class="trace">${trace}</ol>
+          <details>
+            <summary>Extraction trace (${(data.extraction_trace || []).length} decisions)</summary>
+            <p class="muted">Ordered decisions used to build the diagram.</p>
+            <ol class="trace">${trace}</ol>
+          </details>
         </section>
       `;
-      document.getElementById("download").onclick = () => {
-        const blob = new Blob([data.svg], { type: "image/svg+xml" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "architecture.svg";
-        a.click();
-        URL.revokeObjectURL(url);
-      };
+      document.getElementById("download").onclick = () => download("architecture.svg", data.svg, "image/svg+xml");
+      document.getElementById("download-mmd").onclick = () => download("architecture.mmd", data.mermaid || "", "text/plain");
       out.querySelectorAll("tr.clickable, .trace li").forEach((el) => {
         el.addEventListener("click", () => {
           const idx = Number(el.dataset.sentence);

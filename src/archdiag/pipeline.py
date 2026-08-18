@@ -14,6 +14,7 @@ from archdiag.ports import (
     DiagramRenderer,
     SpanProposer,
 )
+from archdiag.mermaid import to_mermaid
 from archdiag.rendering import SvgRenderer
 from archdiag.schema import ArchitectureDiagram
 from archdiag.telemetry import span as otel_span
@@ -89,6 +90,7 @@ class ArchitecturePipeline:
             llm_provider=self.proposer.provider_name,
             llm_accepted=accepted,
             llm_rejected=rejected,
+            mermaid=to_mermaid(components, connections),
             svg=self.renderer.render(components, connections, ambiguities),
         )
 

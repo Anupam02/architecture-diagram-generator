@@ -67,6 +67,7 @@ class ArchitectureDiagram(BaseModel):
     llm_provider: str = "off"
     llm_accepted: int = 0
     llm_rejected: int = 0
+    mermaid: str = ""
     svg: str
     disclaimer: str = (
         "This diagram only includes components and connections supported by the notes. "

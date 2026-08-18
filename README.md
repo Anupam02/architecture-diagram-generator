@@ -105,7 +105,7 @@ Open **http://127.0.0.1:8001**
 1. Click **Load exercise example** (or paste your own notes).
 2. Click **Generate diagram**.
 3. Read the diagram, the component table, the connection table, the sentence links, the extraction trace, and the ambiguity list.
-4. Click **Download SVG** to save `architecture.svg`.
+4. Click **Download SVG** or **Download Mermaid**.
 
 That is the intended user experience: paste notes → run → inspect evidence → download the picture.
 
@@ -124,7 +124,7 @@ These checks include: the exercise example extracts the supported components and
 ### CLI
 
 ```bash
-python -m archdiag sample_notes/exercise_example.txt --pretty --svg architecture.svg
+python -m archdiag sample_notes/exercise_example.txt --pretty --svg architecture.svg --mermaid architecture.mmd
 ```
 
 Prints JSON (components, connections, ambiguities) and writes `architecture.svg`.
@@ -194,7 +194,10 @@ src/archdiag/ambiguities.py missing-detail flags
 src/archdiag/llm.py         proposer + verbatim gate
 src/archdiag/parse.py       public facade (`interpret_notes`)
 src/archdiag/schema.py      API models and extraction trace
-src/archdiag/render.py      SVG layout
+src/archdiag/layout.py      zoned boxes and curved edges
+src/archdiag/render.py      SVG drawing
+src/archdiag/mermaid.py     Mermaid export of the same graph
+src/archdiag/evaluate.py    labelled fixtures (recall / forbidden extras)
 src/archdiag/telemetry.py   optional OpenTelemetry (OTLP) spans
 src/archdiag/api.py         FastAPI + UI
 src/archdiag/static/        HTML page
